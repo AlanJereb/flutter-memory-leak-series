@@ -1,7 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import "package:leak_tracker/leak_tracker.dart";
 
 void main() {
+  LeakTracking.start();
+  FlutterMemoryAllocations.instance.addListener((ObjectEvent event) {
+    LeakTracking.dispatchObjectEvent(event.toMap());
+  });
   runApp(const MyApp());
 }
 
@@ -28,13 +34,31 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final _leakingAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    // we are not disposing _leakingAnimation on purpose
+    super.dispose();
+  }
+
   void _induceMemoryLeak() {
-    for (int i = 0; i < 100000; i++) {
-      Timer.periodic(const Duration(seconds: 1), (timer) {
-        // do nothing
-      });
-    }
+    _leakingAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
@@ -48,7 +72,7 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CustomTextButton(onPressed: _induceMemoryLeak, text: "Add 100.000 timers"),
+            CustomTextButton(onPressed: _induceMemoryLeak, text: "Add a leak"),
             const SizedBox(height: 30),
             CustomTextButton(
               onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const SecondPage())),
@@ -70,8 +94,13 @@ class SecondPage extends StatelessWidget {
       appBar: AppBar(backgroundColor: Theme.of(context).colorScheme.inversePrimary, title: const Text("Memory Leaks demo page - 2")),
       body: Center(
         child: CustomTextButton(
-          onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomePage())),
-          text: "Navigate back",
+          onPressed: () async {
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomePage()));
+            await Future.delayed(const Duration(milliseconds: 500)); // let leak_tracker settle
+            Leaks leaks = await LeakTracking.collectLeaks();
+            print("Leaks collected");
+          },
+          text: "Navigate back and collect leaks",
         ),
       ),
     );
